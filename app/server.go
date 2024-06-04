@@ -16,7 +16,6 @@ func Handler(conn net.Conn) {
 		return
 	}
 	fmt.Printf("Request: %s %s\n", reader.Method, reader.URL.Path)
-	conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 
 	if reader.URL.Path == "/" {
 		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
