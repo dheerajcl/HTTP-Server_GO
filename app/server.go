@@ -1,26 +1,42 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
-	// Uncomment this block to pass the first stage
 	"net"
+	"net/http"
 	"os"
 )
 
-func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.Println("Logs from your program will appear here!")
+func Handler(conn net.Conn) {
+	defer conn.Close()
+	reader, err := http.ReadRequest(bufio.NewReader(conn))
+	if err != nil {
+		fmt.Println("Error reading request. ", err.Error())
+		return
+	}
+	fmt.Printf("Request: %s %s\n", reader.Method, reader.URL.Path)
+	conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 
-	// Uncomment this block to pass the first stage
+	if reader.URL.Path == "/" {
+		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+		return
+	}
+	conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+}
+
+func main() {
 	l, err := net.Listen("tcp", "0.0.0.0:4221")
 	if err != nil {
-	 	fmt.Println("Failed to bind to port 4221")
-	 	os.Exit(1)
+		fmt.Println("Failed to bind to port 4221")
+		os.Exit(1)
 	}
-	conn, err:= l.Accept()
+	fmt.Println("Listening on port 4221")
+	defer l.Close()
+	conn, err := l.Accept()
 	if err != nil {
 		fmt.Println("Error accepting connection: ", err.Error())
-	 	os.Exit(1)
+		os.Exit(1)
 	}
-	conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+	Handler(conn)
 }
