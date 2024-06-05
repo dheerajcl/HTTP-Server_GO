@@ -1,65 +1,55 @@
 package main
-
 import (
-	"bufio"
 	"fmt"
 	"net"
 	"os"
 	"strings"
 )
-
-type HTTPRes struct {
-	Method    string
-	Path      string
-	Headers   map[string]string
-	BodyMeta  BodyMeta
+type Request struct {
+	method  string
+	path    string
+	version string
+	headers map[string]string
 }
-
-type BodyMeta struct {
-	ContentBody string
-	ContentLen  int
-	ContentType string
-}
-
-func NewParser(request string) *HTTPRes {
-	lines := strings.Split(request, "\r\n")
+func parseRequest(buffer []byte) Request {
+	bufferString := string(buffer)
+	lines := strings.Split(bufferString, "\r\n")
 	requestLine := strings.Split(lines[0], " ")
-	method, path := requestLine[0], requestLine[1]
-
 	headers := make(map[string]string)
-	for _, line := range lines[1:] {
-		if line == "" {
-			break
-		}
-		headerParts := strings.SplitN(line, ": ", 2)
-		if len(headerParts) == 2 {
-			headers[headerParts[0]] = headerParts[1]
+	for i := 1; i < len(lines); i++ {
+		fmt.Println("setting header", lines[i])
+		header := strings.Split(lines[i], ": ")
+		if len(header) > 1 {
+			headers[strings.ToLower(header[0])] = header[1]
 		}
 	}
-
-	return &HTTPRes{
-		Method:   method,
-		Path:     path,
-		Headers:  headers,
-		BodyMeta: BodyMeta{},
+	return Request{
+		method:  requestLine[0],
+		path:    requestLine[1],
+		version: requestLine[2],
+		headers: headers,
 	}
 }
-
-func (res *HTTPRes) FormatRes(statusCode int, statusText string) string {
-	response := fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, statusText)
-	if res.BodyMeta.ContentType != "" {
-		response += fmt.Sprintf("Content-Type: %s\r\n", res.BodyMeta.ContentType)
-	}
-	if res.BodyMeta.ContentLen != 0 {
-		response += fmt.Sprintf("Content-Length: %d\r\n", res.BodyMeta.ContentLen)
-	}
-	response += "\r\n"
-	if res.BodyMeta.ContentBody != "" {
-		response += res.BodyMeta.ContentBody
-	}
-	return response
+func buildResponse(body string, statusLine string) string {
+	return fmt.Sprintf("HTTP/1.1 %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", statusLine, len(body), body)
 }
-
+func handleRequest(request Request, conn net.Conn) {
+	if strings.HasPrefix(request.path, "/echo/") {
+		suffix := strings.Split(request.path[6:], "/")[0]
+		fmt.Println("Suffix", strings.Split(suffix, "/"))
+		response := buildResponse(suffix, "200 OK")
+		conn.Write([]byte(response))
+	} else if request.path == "/user-agent" {
+		userAgentHeaderValue, _ := request.headers["user-agent"]
+		response := buildResponse(userAgentHeaderValue, "200 OK")
+		conn.Write([]byte(response))
+	} else if request.path == "/" {
+		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\nHello, World!"))
+	} else {
+		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+	}
+	defer conn.Close()
+}
 func main() {
 	fmt.Println("Logs from your program will appear here!")
 	l, err := net.Listen("tcp", "0.0.0.0:4221")
@@ -73,35 +63,10 @@ func main() {
 			fmt.Println("Error accepting connection: ", err.Error())
 			os.Exit(1)
 		}
-		// concurrent
-		go handleConnection(conn)
-	}
-}
-
-func handleConnection(conn net.Conn) {
-	defer conn.Close()
-	reader := bufio.NewReader(conn)
-	for {
-		request, err := reader.ReadString('\n')
-		if err != nil {
-			fmt.Println("could not read buffer:", err)
-			return
-		}
-		parser := NewParser(request)
-		httpRes := parser
-		var res string
-		fmt.Println(httpRes)
-		if strings.HasPrefix(httpRes.Path, "/echo") {
-			res = httpRes.FormatRes(200, "OK")
-		} else if httpRes.Path == "/user-agent" {
-			bodyRes := httpRes.Headers["User-Agent"]
-			httpRes.BodyMeta.ContentBody = bodyRes
-			httpRes.BodyMeta.ContentLen = len(bodyRes)
-			httpRes.BodyMeta.ContentType = "text/plain"
-			res = httpRes.FormatRes(200, "OK")
-		} else {
-			res = "HTTP/1.1 404 Not Found\r\n\r\n"
-		}
-		conn.Write([]byte(res))
+		defer l.Close()
+		buffer := make([]byte, 1024)
+		_, err = conn.Read(buffer)
+		request := parseRequest(buffer)
+		go handleRequest(request, conn)
 	}
 }
