@@ -1,72 +1,74 @@
 package main
 import (
 	"fmt"
+	"log"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 )
 type Request struct {
-	method  string
-	path    string
-	version string
-	headers map[string]string
+	verb       string
+	path       string
+	version    string
+	host       string
+	user_agent string
 }
-func parseRequest(buffer []byte) Request {
-	bufferString := string(buffer)
-	lines := strings.Split(bufferString, "\r\n")
-	requestLine := strings.Split(lines[0], " ")
-	headers := make(map[string]string)
-	for i := 1; i < len(lines); i++ {
-		fmt.Println("setting header", lines[i])
-		header := strings.Split(lines[i], ": ")
-		if len(header) > 1 {
-			headers[strings.ToLower(header[0])] = header[1]
+func parseReq(req string) Request {
+	var Req Request
+	req_lines := strings.Split(req, "\r\n")
+	first_line := strings.Split(req_lines[0], " ")
+	Req.verb = first_line[0]
+	Req.path = first_line[1]
+	Req.version = first_line[2]
+	Req.host = strings.Split(req_lines[1], ":")[1]
+	Req.user_agent = strings.Split(req_lines[2], ":")[1]
+	return Req
+}
+func handleConnection(c net.Conn) {
+	buffer := make([]byte, 5000)
+	c.Read(buffer)
+	req := string(buffer)
+	// Req := parseReq(req)
+	// fmt.Println(Req)
+	first_line := strings.Split(strings.Split(req, "\r\n")[0], " ")
+	if strings.HasPrefix(first_line[1], "/echo/") {
+		str := strings.Split(first_line[1], "/")[2]
+		c.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(str), str)))
+	} else if strings.HasPrefix(first_line[1], "/files/") {
+		directory := os.Args[2]
+		str := strings.Split(first_line[1], "/")[2]
+		data, err := os.ReadFile(directory + str)
+		if err != nil {
+			c.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+		} else {
+			c.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + strconv.Itoa(len(data)) + "\r\n\r\n" + string(data) + "\r\n\r\n"))
 		}
+	} else if first_line[1] == "/" {
+		c.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 	}
-	return Request{
-		method:  requestLine[0],
-		path:    requestLine[1],
-		version: requestLine[2],
-		headers: headers,
-	}
-}
-func buildResponse(body string, statusLine string) string {
-	return fmt.Sprintf("HTTP/1.1 %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", statusLine, len(body), body)
-}
-func handleRequest(request Request, conn net.Conn) {
-	if strings.HasPrefix(request.path, "/echo/") {
-		suffix := strings.Split(request.path[6:], "/")[0]
-		fmt.Println("Suffix", strings.Split(suffix, "/"))
-		response := buildResponse(suffix, "200 OK")
-		conn.Write([]byte(response))
-	} else if request.path == "/user-agent" {
-		userAgentHeaderValue, _ := request.headers["user-agent"]
-		response := buildResponse(userAgentHeaderValue, "200 OK")
-		conn.Write([]byte(response))
-	} else if request.path == "/" {
-		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\nHello, World!"))
+	if first_line[1] == "/user-agent" {
+		// req_agent := strings.Trim(Req.user_agent, " ")
+		user_agent := strings.Trim(strings.Split(strings.Split(req, "\r\n")[2], ":")[1], " ")
+		c.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(user_agent), user_agent)))
 	} else {
-		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+		c.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
 	}
-	defer conn.Close()
 }
 func main() {
-	fmt.Println("Logs from your program will appear here!")
-	l, err := net.Listen("tcp", "0.0.0.0:4221")
+	// You can use print statements as follows for debugging, they'll be visible when running tests.
+	log.Println("Server running at localhost:4221")
+	l, err := net.Listen("tcp", ":4221")
 	if err != nil {
-		fmt.Println("Failed to bind to port 4221")
-		os.Exit(1)
+		log.Printf("Failed to bind to port 4221")
+		os.Exit(69)
 	}
 	for {
 		conn, err := l.Accept()
 		if err != nil {
-			fmt.Println("Error accepting connection: ", err.Error())
+			log.Print("Unable to handle connection")
 			os.Exit(1)
 		}
-		defer l.Close()
-		buffer := make([]byte, 1024)
-		_, err = conn.Read(buffer)
-		request := parseRequest(buffer)
-		go handleRequest(request, conn)
+		go handleConnection(conn)
 	}
 }
