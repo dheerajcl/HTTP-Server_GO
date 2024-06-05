@@ -1,7 +1,7 @@
 package main
 
 import (
-	//"bufio"
+	"bufio"
 	"fmt"
 	"net"
 	"os"
@@ -80,19 +80,18 @@ func main() {
 
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
+	reader := bufio.NewReader(conn)
 	for {
-		buff := make([]byte, 1024)
-		n, err := conn.Read(buff)
+		request, err := reader.ReadString('\n')
 		if err != nil {
-			fmt.Println("could not read buffer")
-			os.Exit(1)
+			fmt.Println("could not read buffer:", err)
+			return
 		}
-		received := string(buff[:n])
-		parser := NewParser(received)
+		parser := NewParser(request)
 		httpRes := parser
 		var res string
 		fmt.Println(httpRes)
-		if httpRes.Path == "/echo" || httpRes.Path == "/" {
+		if strings.HasPrefix(httpRes.Path, "/echo") {
 			res = httpRes.FormatRes(200, "OK")
 		} else if httpRes.Path == "/user-agent" {
 			bodyRes := httpRes.Headers["User-Agent"]
